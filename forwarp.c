@@ -35,7 +35,7 @@ struct fwp {
     int fd;
     struct fwp_addr addr;
     unsigned index;
-    unsigned op;
+    uint16_t op;
 };
 
 static void
@@ -70,14 +70,7 @@ fwp_init(struct fwp *fwp, char *name, unsigned op)
     memcpy(&fwp->addr.ll,
            &ifr.ifr_hwaddr.sa_data, ETH_ALEN);
 
-    if (ioctl(fwp->fd, SIOCGIFADDR, &ifr)) {
-        fprintf(stderr, "Unable to find the addr of %s\n", ifr.ifr_name);
-        return 1;
-    }
-    memcpy(&fwp->addr.ip,
-           &((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr, 4);
-
-    fwp->op = op;
+    fwp->op = htons(op);
     return 0;
 }
 
@@ -123,7 +116,7 @@ fwp_recv(struct fwp *fwp, union fwp_pkt *pkt)
             perror("recv");
         return -1;
     }
-    if ((pkt->x.arp.ar_op != htons(fwp->op)) ||
+    if ((pkt->x.arp.ar_op != fwp->op) ||
         (pkt->x.arp.ar_hln != sizeof(pkt->x.s.ll)) ||
         (pkt->x.arp.ar_pln != sizeof(pkt->x.s.ip)))
         return -1;
@@ -224,25 +217,21 @@ main(int argc, char **argv)
         nud_state = NUD_PERMANENT;
     }
     enum {src, dst, count};
-    struct fwp fwp[count];
+    struct fwp fwp[count] = {0};
 
     if (fwp_init(&fwp[src], argv[1], ARPOP_REQUEST) ||
         fwp_init(&fwp[dst], argv[2], ARPOP_REPLY))
         return 1;
 
     printf("Start forwarding ARP Request:\n"
-           " src %02x:%02x:%02x:%02x:%02x:%02x ip %d.%d.%d.%d\n"
-           " dst %02x:%02x:%02x:%02x:%02x:%02x ip %d.%d.%d.%d\n",
+           " src %02x:%02x:%02x:%02x:%02x:%02x\n"
+           " dst %02x:%02x:%02x:%02x:%02x:%02x\n",
            fwp[src].addr.ll[0], fwp[src].addr.ll[1],
            fwp[src].addr.ll[2], fwp[src].addr.ll[3],
            fwp[src].addr.ll[4], fwp[src].addr.ll[5],
-           fwp[src].addr.ip[0], fwp[src].addr.ip[1],
-           fwp[src].addr.ip[2], fwp[src].addr.ip[3],
            fwp[dst].addr.ll[0], fwp[dst].addr.ll[1],
            fwp[dst].addr.ll[2], fwp[dst].addr.ll[3],
-           fwp[dst].addr.ll[4], fwp[dst].addr.ll[5],
-           fwp[dst].addr.ip[0], fwp[dst].addr.ip[1],
-           fwp[dst].addr.ip[2], fwp[dst].addr.ip[3]);
+           fwp[dst].addr.ll[4], fwp[dst].addr.ll[5]);
 
     if (fwp_listen(&fwp[0]) || fwp_listen(&fwp[1]))
         return 1;
@@ -267,8 +256,7 @@ main(int argc, char **argv)
             (!memcmp(pkt.x.s.ll, fwp[src].addr.ll, sizeof(pkt.x.s.ll)))) {
 
             memcpy(pkt.x.eth.h_source, fwp[dst].addr.ll, sizeof(fwp[dst].addr.ll));
-            memcpy(pkt.x.s.ll, fwp[dst].addr.ll, sizeof(pkt.x.s.ll));
-            memcpy(pkt.x.s.ip, fwp[dst].addr.ip, sizeof(pkt.x.s.ip));
+            memcpy(&pkt.x.s, &fwp[dst].addr, sizeof(pkt.x.s));
 
             if (send(fwp[dst].fd, &pkt.x, sizeof(pkt.x), 0) == -1) {
                 switch (errno) {
