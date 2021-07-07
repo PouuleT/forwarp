@@ -35,7 +35,8 @@ struct fwp {
     int fd;
     struct fwp_addr addr;
     unsigned index;
-    uint16_t op;
+    /* uint16_t op; */
+    unsigned op;
 };
 
 static void
@@ -70,7 +71,8 @@ fwp_init(struct fwp *fwp, char *name, unsigned op)
     memcpy(&fwp->addr.ll,
            &ifr.ifr_hwaddr.sa_data, ETH_ALEN);
 
-    fwp->op = htons(op);
+    /* fwp->op = htons(op); */
+    fwp->op = op;
     return 0;
 }
 
@@ -116,7 +118,8 @@ fwp_recv(struct fwp *fwp, union fwp_pkt *pkt)
             perror("recv");
         return -1;
     }
-    if ((pkt->x.arp.ar_op != fwp->op) ||
+    /* if ((pkt->x.arp.ar_op != fwp->op) || */
+    if ((pkt->x.arp.ar_op != htons(fwp->op)) ||
         (pkt->x.arp.ar_hln != sizeof(pkt->x.s.ll)) ||
         (pkt->x.arp.ar_pln != sizeof(pkt->x.s.ip)))
         return -1;
