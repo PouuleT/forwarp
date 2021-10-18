@@ -147,6 +147,7 @@ fwp_init(struct fwp *fwp, const char *name, unsigned op)
     strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name) - 1);
 
     fwp->fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    fprintf(stderr, "INIT %s (idx %d / fd %d) \n", ifr.ifr_name, ifr.ifr_ifindex, fwp->fd);
 
     if (fwp->fd == -1) {
         perror("socket(AF_PACKET)");
@@ -180,6 +181,7 @@ fwp_bind(struct fwp *fwp)
         .sll_protocol = htons(ETH_P_ALL),
         .sll_ifindex = fwp->index,
     };
+    fprintf(stderr, "binding on fd %d\n", fwp->fd);
     if (bind(fwp->fd, (struct sockaddr *)&sll, sizeof(sll)) == -1) {
         perror("bind");
         return 1;
@@ -222,7 +224,7 @@ fwp_bind(struct fwp *fwp)
         {0x28, 0, 0, 0x00000010 },
         {0x15, 0, 3, 0x00000806 },
         {0x28, 0, 0, 0x00000018 },
-        {0x15, 0, 1, 0x00000001 },
+        {0x15, 0, 1, fwp->op    },
         {0x6, 0, 0, 0x00040000 },
         {0x6, 0, 0, 0x00000000 },
     };
@@ -488,8 +490,16 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
                         reply = replies[4095];
                         rep_size = sizeof(rep) - 4;
                     }
+                    fprintf(stderr, "Checking if arp source %02x:%02x:%02x:%02x:%02x:%02x = fwp src %02x:%02x:%02x:%02x:%02x:%02x\n",
+                           pkt->arp.s.ll.b[0], pkt->arp.s.ll.b[1], pkt->arp.s.ll.b[2],
+                           pkt->arp.s.ll.b[3], pkt->arp.s.ll.b[4], pkt->arp.s.ll.b[5],
+                           fwp[src].addr.ll.b[0], fwp[src].addr.ll.b[1], fwp[src].addr.ll.b[2],
+                           fwp[src].addr.ll.b[3], fwp[src].addr.ll.b[4], fwp[src].addr.ll.b[5]
+                    );
                     if (!memcmp(&pkt->arp.s.ll, &fwp[src].addr.ll, sizeof(pkt->arp.s.ll))) {
+                        fprintf(stderr, "pwet \n");
                         if (vlan == -1) {
+                            fprintf(stderr, "pwet -1\n");
                             rep = (struct fwp_pkt) {
                                 .eth.t = pkt->eth.t,
                                 .eth.s = fwp[dst].addr.ll,
@@ -502,6 +512,7 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
                                 },
                             };
                         } else {
+                            fprintf(stderr, "pwet else\n");
                             rep = (struct fwp_pkt) {
                                 .eth.t = pkt->eth.t,
                                 .eth.s = fwp[dst].addr.ll,
@@ -520,7 +531,9 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
                         }
                         fd = fwp[dst].fd;
                     } else if (reply.ip && (ipmask(pkt->arp.t.ip, reply.mask) == reply.ip)) {
+                        fprintf(stderr, "w000t \n");
                         if (vlan == -1) {
+                            fprintf(stderr, "w000t -1\n");
                             rep = (struct fwp_pkt) {
                                 .eth.t = pkt->eth.s,
                                 .eth.s = fwp[src].addr.ll,
@@ -534,6 +547,7 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
                                 },
                             };
                         } else {
+                            fprintf(stderr, "w000t else\n");
                             rep = (struct fwp_pkt) {
                                 .eth.t = pkt->eth.s,
                                 .eth.s = fwp[src].addr.ll,
