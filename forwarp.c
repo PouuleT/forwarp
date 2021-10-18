@@ -147,6 +147,7 @@ fwp_init(struct fwp *fwp, const char *name, unsigned op)
     strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name) - 1);
 
     fwp->fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+    fprintf(stderr, "INIT %s (idx %d / fd %d) \n", ifr.ifr_name, ifr.ifr_ifindex, fwp->fd);
 
     if (fwp->fd == -1) {
         perror("socket(AF_PACKET)");
@@ -180,6 +181,7 @@ fwp_bind(struct fwp *fwp)
         .sll_protocol = htons(ETH_P_ALL),
         .sll_ifindex = fwp->index,
     };
+    fprintf(stderr, "binding on fd %d\n", fwp->fd);
     if (bind(fwp->fd, (struct sockaddr *)&sll, sizeof(sll)) == -1) {
         perror("bind");
         return 1;
@@ -288,6 +290,9 @@ fwp_neigh(int ifindex, struct fwp_addr *addr, int nud_state)
     };
     fwp_attr(&req.nh, NDA_DST, addr->ip.b, sizeof(addr->ip));
     fwp_attr(&req.nh, NDA_LLADDR, addr->ll.b, sizeof(addr->ll));
+    fprintf(stderr, "in neigh with arp source %02x:%02x:%02x:%02x:%02x:%02x\n",
+           addr->ll.b[0], addr->ll.b[1], addr->ll.b[2],
+           addr->ll.b[3], addr->ll.b[4], addr->ll.b[5]);
 
     struct sockaddr_nl snl = {
         .nl_family = AF_NETLINK,
@@ -493,17 +498,28 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
                         vlan = pkt->vlan.id.b[0] & 15;
                         vlan = (vlan << 8) | pkt->vlan.id.b[1];
                         arp = &pkt->vlan.arp;
+                        fprintf(stderr, "we have vlan %d in packet \n", vlan);
                     }
-                    if (ppd->tp_status & TP_STATUS_VLAN_VALID)
+                    if (ppd->tp_status & TP_STATUS_VLAN_VALID) {
                         vlan = ppd->hv1.tp_vlan_tci & 0xFFF;
+                        fprintf(stderr, "we have vlan %d in metadata \n", vlan);
+                    }
 
                     if (vlan == 4095)
                         rep_size -= 4;
 
                     struct fwp_reply reply = replies[vlan];
 
+                    fprintf(stderr, "Checking if arp source %02x:%02x:%02x:%02x:%02x:%02x = fwp src %02x:%02x:%02x:%02x:%02x:%02x\n",
+                           arp->s.ll.b[0], arp->s.ll.b[1], arp->s.ll.b[2],
+                           arp->s.ll.b[3], arp->s.ll.b[4], arp->s.ll.b[5],
+                           fwp[src].addr.ll.b[0], fwp[src].addr.ll.b[1], fwp[src].addr.ll.b[2],
+                           fwp[src].addr.ll.b[3], fwp[src].addr.ll.b[4], fwp[src].addr.ll.b[5]
+                    );
                     if (!memcmp(&arp->s.ll, &fwp[src].addr.ll, sizeof(pkt->arp.s.ll))) {
+                        fprintf(stderr, "it's a match go forwarp\n");
                         if (vlan == 4095) {
+                            fprintf(stderr, "vlan = 4095\n");
                             rep = (struct fwp_pkt) {
                                 .eth.t = pkt->eth.t,
                                 .eth.s = fwp[dst].addr.ll,
@@ -516,6 +532,7 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
                                 },
                             };
                         } else {
+                            fprintf(stderr, "vlan != 4095\n");
                             rep = (struct fwp_pkt) {
                                 .eth.t = pkt->eth.t,
                                 .eth.s = fwp[dst].addr.ll,
@@ -534,7 +551,9 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
                         }
                         fd = fwp[dst].fd;
                     } else if (reply.ip && (ipmask(arp->t.ip, reply.mask) == reply.ip)) {
+                        fprintf(stderr, "it's not a match, but it's matching arply \n");
                         if (vlan == 4095) {
+                            fprintf(stderr, "vlan = 4095\n");
                             rep = (struct fwp_pkt) {
                                 .eth.t = pkt->eth.s,
                                 .eth.s = fwp[src].addr.ll,
@@ -548,6 +567,7 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
                                 },
                             };
                         } else {
+                            fprintf(stderr, "vlan != 4095\n");
                             rep = (struct fwp_pkt) {
                                 .eth.t = pkt->eth.s,
                                 .eth.s = fwp[src].addr.ll,
@@ -586,6 +606,7 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
             }
         }
         if ((fds[dst].revents & POLLIN)) {
+            fprintf(stderr, "it's a reply\n");
             struct fwp *f = &fwp[dst];
 
             struct tpacket_block_desc *desc = (struct tpacket_block_desc *)
@@ -600,8 +621,14 @@ fwp_run(const char *id, const char *ifsrc, const char *ifdst)
                 for (unsigned i = 0; i < num_pkts; i++) {
                     uint8_t *buf = ((uint8_t *) ppd + ppd->tp_mac);
              //     int size = ppd->tp_snaplen; // TODO
+                    fprintf(stderr, "it's a reply, checking packet\n");
 
                     struct fwp_pkt *pkt = (struct fwp_pkt *)buf;
+
+                    fprintf(stderr, "it's a reply, setting arp source %02x:%02x:%02x:%02x:%02x:%02x as reachable\n",
+                           pkt->arp.s.ll.b[0], pkt->arp.s.ll.b[1], pkt->arp.s.ll.b[2],
+                           pkt->arp.s.ll.b[3], pkt->arp.s.ll.b[4], pkt->arp.s.ll.b[5]);
+                    fprintf(stderr, "oups\n");
 
                     fwp_neigh(fwp[src].index, &pkt->arp.s, NUD_REACHABLE);
 
